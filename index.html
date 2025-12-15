@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Monthly Budget Analyzer</title>
+  <style>
+    :root{--gap:14px;--leftw:40%;--rightw:60%}
+    body{font-family:Inter,Segoe UI,Helvetica,Arial;color:#222;margin:0;padding:18px;background:#f4f6f8}
+    h1{margin:4px 0 12px;font-size:20px}
+    .topcontrols{display:flex;gap:12px;align-items:center;margin-bottom:8px}
+    .container{display:flex;gap:var(--gap);align-items:flex-start}
+    .left{width:var(--leftw);background:#fff;border-radius:8px;padding:12px;box-shadow:0 6px 18px rgba(15,15,15,0.06)}
+    .right{width:var(--rightw);position:sticky;top:18px;height:94vh;background:#fff;border-radius:8px;padding:14px;box-shadow:0 6px 18px rgba(15,15,15,0.06);display:flex;flex-direction:column;overflow:hidden}
+    /* fixed expenses area */
+    .fixed{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+    .fixed .item{flex:1 1 45%;min-width:120px}
+    label{font-size:12px;color:#333}
+    input[type=number], input[type=month], input[type=number].small{width:100%;padding:6px;border-radius:6px;border:1px solid #d4d7db;margin-top:6px;box-sizing:border-box}
+    .days{height:68vh;overflow-y:auto;border-top:1px solid #eee;padding-top:10px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px dashed #e8e8e8;text-align:left;font-size:13px}
+    th{position:sticky;top:0;background:#fff;z-index:1}
+    .subcat{width:160px}
+    .dayrow td:first-child{width:76px}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:10px}
+    button{padding:8px 10px;border-radius:6px;border:none;background:#0b79ff;color:#fff;cursor:pointer}
+    button.secondary{background:#efefef;color:#222}
+    .charts{display:flex;gap:12px;align-items:flex-start}
+    .chartbox{flex:1;padding:6px;display:flex;flex-direction:column;align-items:stretch}
+    .chartframe{background:#fff;border-radius:6px;padding:6px;border:1px solid #f0f0f0;flex:1;display:flex;align-items:center;justify-content:center}
+    canvas{width:100% !important;height:320px !important;border-radius:6px}
+    .summary{margin-top:12px;overflow:auto}
+    table.summarytable{width:100%;border-collapse:collapse}
+    .summarytable th,.summarytable td{padding:8px;border:1px solid #eee;text-align:center}
+    .green{color:green} .red{color:#d00}
+    footer{font-size:12px;color:#666;margin-top:10px}
+    tfoot td{font-weight:700}
+    @media (max-width:1200px){:root{--leftw:45%;--rightw:53%}}
+    @media (max-width:980px){.container{flex-direction:column}.left,.right{width:100%} .right{position:static;height:auto}}
+  </style>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h1>Monthly Budget Analyzer (variable expenses charts & suggestions)</h1>
+
+  <div class="topcontrols">
+    <label style="font-weight:600;margin-right:8px">Select month:</label>
+    <input type="month" id="monthPicker" />
+    <button id="clearSaved" class="secondary">Clear Saved Month Data</button>
+    <button id="saveNow" class="secondary">Save Now</button>
+    <div style="margin-left:auto;color:#555;font-size:13px">Tip: Data auto-saves for selected month. Export CSV before clearing.</div>
+  </div>
+
+  <div class="container">
+    <div class="left">
+      <strong>Fixed expenses (no charts or suggestions — displayed for reference)</strong>
+      <div class="fixed" id="fixedInputs">
+        <!-- will be populated by JS with initial values -->
+      </div>
+
+      <div style="margin-top:6px"><strong>Enter daily variable expenses (31 days)</strong></div>
+      <div class="days">
+        <table id="daysTable">
+          <thead>
+            <tr>
+              <th style="width:70px">Date</th>
+              <th class="subcat">Category</th>
+              <th style="width:160px">Amount</th>
+            </tr>
+          </thead>
+          <tbody id="daysBody">
+            <!-- rows injected by JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="controls">
+        <button id="recalc">Recalculate</button>
+        <button class="secondary" id="clear">Clear Inputs</button>
+        <button class="secondary" id="exportCsv">Export CSV</button>
+      </div>
+
+      <footer>Notes: Left column scrolls independently. Right side stays fixed. Charts & suggestions apply only to variable expenses.</footer>
+    </div>
+
+    <div class="right">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <strong>Analysis (variable categories)</strong>
+        <div>
+          Month total spent: <span id="monthTotal">0.00</span>
+        </div>
+      </div>
+
+      <div class="charts" style="margin-top:12px">
+        <div class="chartbox" style="flex-basis:45%">
+          <div class="chartframe"><canvas id="pieChart"></canvas></div>
+        </div>
+        <div class="chartbox" style="flex-basis:55%">
+          <div class="chartframe"><canvas id="barChart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="summary" style="margin-top:12px;flex:1;display:flex;flex-direction:column">
+        <div style="flex:1;overflow:auto;padding-right:6px">
+          <table class="summarytable" id="summaryTable">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Actual</th>
+                <th>Budget</th>
+                <th>Difference</th>
+                <th>Suggestion</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- injected -->
+            </tbody>
+            <tfoot>
+              <tr id="totalsRow">
+                <td>Total</td>
+                <td id="totalActual">0.00</td>
+                <td id="totalBudget">0.00</td>
+                <td id="totalDiff">0.00</td>
+                <td id="totalSug">---</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // Configuration: fixed & variable budgets provided by user
+    const fixedBudgets = {
+      Rent:15500, RD:5000, Stocks:5000, MutualFund:3000, Subscriptions:1140
+    };
+    const variableBudgets = {
+      Grocery:3500, Snacks:1500, 'Vegetable + Milk':1250, Fruits:2500, Bills:650, Hospital:10000, Transport:1800, Mics:1200
+    };
+
+    const STORAGE_KEY = 'budget_saved_single_month'; // Option B: only one month saved at a time
+
+    // Build fixed inputs area
+    const fixedContainer = document.getElementById('fixedInputs');
+    for(const [k,v] of Object.entries(fixedBudgets)){
+      const div = document.createElement('div'); div.className='item';
+      div.innerHTML = `<label>${k}</label><input type='number' step='0.01' data-key='${k}' value='${v}' />`;
+      fixedContainer.appendChild(div);
+    }
+
+    // Month picker defaults to current month (ensure always set)
+    const monthPicker = document.getElementById('monthPicker');
+    const now = new Date();
+    const defaultMonthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    if(!monthPicker.value) monthPicker.value = defaultMonthStr;
+
+    // Build 31-day input rows
+    const categories = Object.keys(variableBudgets);
+    const daysBody = document.getElementById('daysBody');
+
+    function buildRowsForMonth(month, year){
+      daysBody.innerHTML = '';
+      for(let day=1; day<=31; day++){
+        for(let i=0;i<categories.length;i++){
+          const tr = document.createElement('tr'); tr.className='dayrow';
+          const tdDate = document.createElement('td');
+          // show day-month as d-m (month numeric)
+          tdDate.textContent = (i===0? `${String(day).padStart(2,'0')}-${String(month).padStart(2,'0')}` : '');
+          const tdCat = document.createElement('td'); tdCat.textContent = categories[i]; tdCat.className='subcat';
+          const tdAmt = document.createElement('td');
+          tdAmt.innerHTML = `<input type='number' step='0.01' min='0' data-day='${day}' data-cat='${categories[i]}' value='' style='width:100%;padding:6px;border-radius:6px;border:1px solid #e6e6e6'>`;
+          tr.appendChild(tdDate); tr.appendChild(tdCat); tr.appendChild(tdAmt);
+          daysBody.appendChild(tr);
+        }
+      }
+      // attach event listeners after building
+      attachInputListeners();
+    }
+
+    function attachInputListeners(){
+      document.querySelectorAll("input[data-day][data-cat]").forEach(inp=>{
+        inp.removeEventListener('input', inputChanged);
+        inp.addEventListener('input', inputChanged);
+      });
+    }
+
+    function inputChanged(e){
+      if(window._saveT) clearTimeout(window._saveT);
+      window._saveT = setTimeout(()=>{ saveDataToStorage(); renderAnalysis(); }, 300);
+    }
+
+    // Ensure rows are built even if monthPicker had no value initially
+    (function init(){
+      const [initYear, initMonth] = (monthPicker.value || defaultMonthStr).split('-').map(Number);
+      buildRowsForMonth(initMonth, initYear);
+      // Try to load stored data for this month (if stored month matches)
+      const loaded = loadDataFromStorageIfMatches();
+      if(!loaded) renderAnalysis();
+    })();
+
+    // Utilities: read all inputs and aggregate
+    function aggregate(){
+      const sums = {};
+      for(const c of Object.keys(variableBudgets)) sums[c]=0;
+      const inputs = document.querySelectorAll("input[data-day][data-cat]");
+      inputs.forEach(inp=>{
+        const val = parseFloat(inp.value) || 0;
+        const cat = inp.dataset.cat;
+        sums[cat] += val;
+      });
+      return sums;
+    }
+
+    function renderAnalysis(){
+      const sums = aggregate();
+      let monthTotal = 0; for(const v of Object.values(sums)) monthTotal+=v;
+      document.getElementById('monthTotal').textContent = monthTotal.toFixed(2);
+
+      const labels = Object.keys(sums);
+      const dataVals = labels.map(l=>sums[l]);
+
+      if(window.pieInstance) window.pieInstance.destroy();
+      if(window.barInstance) window.barInstance.destroy();
+
+      const pieCtx = document.getElementById('pieChart').getContext('2d');
+      window.pieInstance = new Chart(pieCtx,{type:'pie',data:{labels:labels,datasets:[{data:dataVals}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right'},tooltip:{callbacks:{label:function(ctx){return ctx.label+': '+ctx.parsed.toFixed(2);}}}}}});
+
+      const budgets = labels.map(l=>variableBudgets[l]);
+      const barCtx = document.getElementById('barChart').getContext('2d');
+      window.barInstance = new Chart(barCtx,{type:'bar',data:{labels:labels,datasets:[{label:'Actual',data:dataVals,backgroundColor:'rgba(54,162,235,0.8)'},{label:'Budget',data:budgets,backgroundColor:'rgba(255,159,64,0.8)'}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': '+ctx.parsed.toFixed(2);}}}},scales:{x:{beginAtZero:true}}}});
+
+      const tbody = document.querySelector('#summaryTable tbody'); tbody.innerHTML='';
+      let totalActual=0, totalBudget=0;
+      for(const cat of labels){
+        const a = sums[cat]; const b = variableBudgets[cat]; totalActual += a; totalBudget += b; const diff = (a - b);
+        let suggestion='';
+        if(Math.abs(diff) < 0.005) suggestion='Balanced';
+        else if(diff<0) suggestion='Saving';
+        else suggestion='Overspend';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td style='text-align:left'>${cat}</td><td>${a.toFixed(2)}</td><td>${b.toFixed(2)}</td><td class='${diff>0? 'red':'green'}'>${diff.toFixed(2)}</td><td>${suggestion}</td>`;
+        tbody.appendChild(tr);
+      }
+
+      document.getElementById('totalActual').textContent = totalActual.toFixed(2);
+      document.getElementById('totalBudget').textContent = totalBudget.toFixed(2);
+      const totalDiff = (totalActual - totalBudget);
+      const totalDiffEl = document.getElementById('totalDiff'); totalDiffEl.textContent = totalDiff.toFixed(2);
+      totalDiffEl.className = totalDiff>0? 'red':'green';
+      const totSug = totalDiff>0? 'Overall Overspend' : (Math.abs(totalDiff) < 0.005 ? 'Balanced' : 'Overall Saving');
+      document.getElementById('totalSug').textContent = totSug;
+    }
+
+    // Save & Load to localStorage (Option B: single month saved)
+    function getStorage(){
+      try{ return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); }catch(e){ return null; }
+    }
+    function saveDataToStorage(){
+      const sel = monthPicker.value || defaultMonthStr; if(!sel) return;
+      const [y,m] = sel.split('-').map(Number);
+      const entries = {};
+      document.querySelectorAll("input[data-day][data-cat]").forEach(inp=>{
+        const key = `${inp.dataset.day}|${inp.dataset.cat}`;
+        const val = parseFloat(inp.value) || 0;
+        if(val !== 0) entries[key] = val;
+      });
+      const payload = {year:y,month:m,entries:entries,timestamp:Date.now()};
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      console.log('Saved month data', payload);
+    }
+
+    function loadDataFromStorageIfMatches(){
+      const stored = getStorage();
+      if(!stored) return false;
+      const sel = monthPicker.value || defaultMonthStr;
+      const [y,m] = sel.split('-').map(Number);
+      if(stored.year === y && stored.month === m){
+        document.querySelectorAll("input[data-day][data-cat]").forEach(inp=>{
+          const key = `${inp.dataset.day}|${inp.dataset.cat}`;
+          if(stored.entries && stored.entries.hasOwnProperty(key)) inp.value = stored.entries[key];
+          else inp.value = '';
+        });
+        return true;
+      }else{
+        document.querySelectorAll("input[data-day][data-cat]").forEach(inp=>{ inp.value=''; });
+        return false;
+      }
+    }
+
+    // Clear saved month data (localStorage)
+    document.getElementById('clearSaved').addEventListener('click', ()=>{
+      if(confirm('This will CLEAR saved data for the stored month. Make sure you exported CSV if needed. Proceed?')){
+        localStorage.removeItem(STORAGE_KEY);
+        document.querySelectorAll("input[data-day][data-cat]").forEach(i=>i.value='');
+        renderAnalysis();
+        alert('Saved month data cleared.');
+      }
+    });
+
+    // Save Now button
+    document.getElementById('saveNow').addEventListener('click', ()=>{
+      saveDataToStorage();
+      alert('Current month data saved locally.');
+    });
+
+    // When monthPicker changes, rebuild date labels and try load stored if matches
+    monthPicker.addEventListener('change', ()=>{
+      const [y,m] = (monthPicker.value || defaultMonthStr).split('-').map(Number);
+      buildRowsForMonth(m,y);
+      const loaded = loadDataFromStorageIfMatches();
+      if(!loaded) renderAnalysis();
+      else renderAnalysis();
+    });
+
+    // Export CSV for all inputs (includes selected month in filename)
+    document.getElementById('exportCsv').addEventListener('click',()=>{
+      const sel = monthPicker.value || defaultMonthStr;
+      const [y,m] = sel.split('-').map(Number);
+      const monthLabel = `${String(m).padStart(2,'0')}-${y}`;
+      const rows = [['Date','Category','Amount']];
+      document.querySelectorAll('input[data-day][data-cat]').forEach(i=>{
+        const day = i.dataset.day; const cat = i.dataset.cat; const val = parseFloat(i.value)||0; rows.push([`${String(day).padStart(2,'0')}-${String(m).padStart(2,'0')}-${y}`,cat,val.toFixed(2)]);
+      });
+      const csv = rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
+      const blob = new Blob([csv],{type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=`monthly_expenses_${monthLabel}.csv`; a.click(); URL.revokeObjectURL(url);
+    });
+
+    // Allow editing of fixed budgets to update overall display (but no charts for them)
+    document.querySelectorAll('#fixedInputs input').forEach(inp=>inp.addEventListener('input',()=>{
+      const k = inp.dataset.key; fixedBudgets[k] = parseFloat(inp.value)||0;
+    }));
+  </script>
+</body>
+</html>
